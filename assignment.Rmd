@@ -1,0 +1,109 @@
+---
+title: "Practical Machine Learning Assignment"
+author: "Radomir Nowacki"
+date: "December 24, 2015"
+output: html_document
+---
+# Machine learning assignment for Coursera
+
+## Libraries
+
+```{r}
+
+library(dplyr)
+library(caret)
+library(randomForest)
+library(doParallel)
+library(e1071)
+
+```
+
+
+## Getting the training and testing data
+
+The data for the assignment is download and preprocessed by assigning both empty strings and #DIV/0! as NA data points. 
+
+```{r}
+training_url <- 'https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv'
+testing_url <- 'https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv'
+train_src <- read.csv(training_url, na.strings=c("NA","", "#DIV/0!"), stringsAsFactors = FALSE)
+test_src <- read.csv(testing_url, na.strings=c("NA","", "#DIV/0!"), stringsAsFactors = FALSE)
+```
+
+After visual inspection of the data it has been noted that many of the variables contain almost no data. 
+
+```{r}
+na_columns <- sapply(train_src, function(y) sum(length(which(is.na(y))))/nrow(train_src))
+unique((1-na_columns)*100)
+```
+
+Since in the supplied data we either have all the observations for a variable or almost none at all, only those variables with all the observations will be kept for modelling purposes. Additionally some descriptive metadata will be dropped to reduce the complexity of the training set. Finally 53 variables were left as predictors.
+
+```{r}
+column_names <- names(na_columns[na_columns==0])
+
+train_src <- select_(train_src, .dots=column_names) %>% select(-(1:2),-(5:8))
+test_column_names <- train_src %>% select(-classe) %>% colnames %>% c('problem_id')
+test_src <- select_(test_src, .dots=test_column_names)
+```
+
+## Cross Validation
+
+The training data set was split into two sets by the classe variable, 80% was assigned to training model and 20% was used for validation purposes
+
+```{r}
+split_data<- split_data<- createDataPartition(train_src$classe,p=0.8,list=FALSE)
+train <- train_src[split_data,]
+valid <- train_src[-split_data,]
+```
+
+## Random forest model
+
+Random forest model was tried first as a predictor, precomputed model was used for this report to save on computation time.
+
+```{r}
+registerDoParallel(cores = 4)
+set.seed(20151224)
+model_filename <- 'model_fit.RDS'
+if(!exists('model_fit')){ 
+      if(!file.exists(model_filename)) {
+            model_fit <- train(classe~.,data=train,method='parRF',allowParallel=TRUE,prox=TRUE)
+            saveRDS(model_fit,file=model_filename)
+            }
+      else model_fit <- readRDS(file=model_filename)
+}
+```
+
+Inspection of confusion matrices will provide us with in- and out-sampling errors
+
+```{r}
+training_predictions <- predict(model_fit,train)
+confusionMatrix(training_predictions,train$classe)
+```
+
+In-sample accuracy of random forest model is 100% which suggests a very good predictive ability of this model.
+
+```{r}
+valid_predictions <- predict(model_fit,valid)
+confusionMatrix(valid_predictions,valid$classe)
+```
+
+This is confirmed by cross validating against validation subset of the data that was not used for modeling. The out of sample error rate is only 0.05%
+
+## Generating answers for the test
+
+Since the random forest model proved to be so accurate it will be used to predict the answers and no further omdels will be explored.
+
+```{r}
+testing_predictions <- predict(model_fit,newdata=test_src)
+
+pml_write_files = function(x){
+      n = length(x)
+      for(i in 1:n){
+            filename = paste0("problem_id_",i,".txt")
+            write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+      }
+}
+
+pml_write_files(testing_predictions)
+```
